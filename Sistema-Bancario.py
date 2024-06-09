@@ -1,8 +1,8 @@
 import textwrap
 from abc import ABC, abstractmethod
 from datetime import datetime
+from functools import wraps
 from typing import List, Optional
-
 
 class Cliente:
     def __init__(self, endereco: str) -> None:
@@ -15,7 +15,6 @@ class Cliente:
     def adicionar_conta(self, conta: 'Conta') -> None:
         self.contas.append(conta)
 
-
 class PessoaFisica(Cliente):
     def __init__(self, nome: str, data_nascimento: str, cpf: str, senha: str, endereco: str) -> None:
         super().__init__(endereco)
@@ -24,6 +23,14 @@ class PessoaFisica(Cliente):
         self.cpf = cpf
         self.senha = senha
 
+def log_transacao(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        result = func(*args, **kwargs)
+        if isinstance(result, bool) and result:
+            print(f"{datetime.now().strftime('%d-%m-%Y %H:%M:%S')} - {func.__name__} realizada com sucesso!")
+        return result
+    return wrapper
 
 class Conta:
     def __init__(self, numero: int, cliente: Cliente) -> None:
@@ -57,6 +64,7 @@ class Conta:
     def historico(self) -> 'Historico':
         return self._historico
 
+    @log_transacao
     def sacar(self, valor: float) -> bool:
         if valor > self.saldo:
             print_message("Operação falhou! Você não tem saldo suficiente.")
@@ -68,6 +76,7 @@ class Conta:
             print_message("Operação falhou! O valor informado é inválido.")
         return False
 
+    @log_transacao
     def depositar(self, valor: float) -> bool:
         if valor > 0:
             self._saldo += valor
@@ -76,7 +85,6 @@ class Conta:
         else:
             print_message("Operação falhou! O valor informado é inválido.")
         return False
-
 
 class ContaCorrente(Conta):
     def __init__(self, numero: int, cliente: Cliente, limite: float = 500, limite_saques: int = 3) -> None:
@@ -101,7 +109,6 @@ class ContaCorrente(Conta):
             Titular:\t{self.cliente.nome}
         """
 
-
 class Historico:
     def __init__(self) -> None:
         self._transacoes: List[dict] = []
@@ -117,7 +124,6 @@ class Historico:
             "data": datetime.now().strftime("%d-%m-%Y %H:%M:%S"),
         })
 
-
 class Transacao(ABC):
     @property
     @abstractmethod
@@ -127,7 +133,6 @@ class Transacao(ABC):
     @abstractmethod
     def registrar(self, conta: Conta) -> None:
         pass
-
 
 class Saque(Transacao):
     def __init__(self, valor: float) -> None:
@@ -141,7 +146,6 @@ class Saque(Transacao):
         if conta.sacar(self.valor):
             conta.historico.adicionar_transacao(self)
 
-
 class Deposito(Transacao):
     def __init__(self, valor: float) -> None:
         self._valor = valor
@@ -154,11 +158,9 @@ class Deposito(Transacao):
         if conta.depositar(self.valor):
             conta.historico.adicionar_transacao(self)
 
-
 def print_message(message: str, success: bool = False) -> None:
     status = "===" if success else "@@@"
     print(f"\n{status} {message} {status}")
-
 
 def menu() -> str:
     menu_text = """\n
@@ -173,10 +175,8 @@ def menu() -> str:
     => """
     return input(textwrap.dedent(menu_text))
 
-
 def filtrar_cliente(cpf: str, clientes: List[Cliente]) -> Optional[Cliente]:
     return next((cliente for cliente in clientes if cliente.cpf == cpf), None)
-
 
 def autenticar_cliente(cliente: Cliente) -> bool:
     senha = input("Informe a senha: ")
@@ -185,7 +185,6 @@ def autenticar_cliente(cliente: Cliente) -> bool:
     else:
         print_message("Senha incorreta!")
         return False
-
 
 def recuperar_conta_cliente(cliente: Cliente) -> Optional[Conta]:
     if not cliente.contas:
@@ -205,7 +204,6 @@ def recuperar_conta_cliente(cliente: Cliente) -> Optional[Conta]:
                 print_message("Escolha inválida, tente novamente.")
         except ValueError:
             print_message("Entrada inválida, por favor insira um número.")
-
 
 def depositar(clientes: List[Cliente]) -> None:
     cpf = input("Informe o CPF do cliente: ")
@@ -229,7 +227,6 @@ def depositar(clientes: List[Cliente]) -> None:
     if conta:
         cliente.realizar_transacao(conta, transacao)
 
-
 def sacar(clientes: List[Cliente]) -> None:
     cpf = input("Informe o CPF do cliente: ")
     cliente = filtrar_cliente(cpf, clientes)
@@ -251,7 +248,6 @@ def sacar(clientes: List[Cliente]) -> None:
     conta = recuperar_conta_cliente(cliente)
     if conta:
         cliente.realizar_transacao(conta, transacao)
-
 
 def exibir_extrato(clientes: List[Cliente]) -> None:
     cpf = input("Informe o CPF do cliente: ")
@@ -276,7 +272,6 @@ def exibir_extrato(clientes: List[Cliente]) -> None:
     print(f"\nSaldo:\n\tR$ {conta.saldo:.2f}")
     print("==========================================")
 
-
 def criar_cliente(clientes: List[Cliente]) -> None:
     cpf = input("Informe o CPF (somente número): ")
     if filtrar_cliente(cpf, clientes):
@@ -292,7 +287,6 @@ def criar_cliente(clientes: List[Cliente]) -> None:
     clientes.append(cliente)
     print_message("Cliente criado com sucesso!", success=True)
 
-
 def criar_conta(numero_conta: int, clientes: List[Cliente], contas: List[Conta]) -> None:
     cpf = input("Informe o CPF do cliente: ")
     cliente = filtrar_cliente(cpf, clientes)
@@ -306,12 +300,31 @@ def criar_conta(numero_conta: int, clientes: List[Cliente], contas: List[Conta])
     cliente.adicionar_conta(conta)
     print_message("Conta criada com sucesso!", success=True)
 
-
 def listar_contas(contas: List[Conta]) -> None:
     for conta in contas:
         print("=" * 100)
         print(textwrap.dedent(str(conta)))
 
+class IteradorContas:
+    def __init__(self, contas: List[Conta]):
+        self._contas = contas
+        self._index = 0
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if self._index < len(self._contas):
+            conta = self._contas[self._index]
+            self._index += 1
+            return {
+                "numero": conta.numero,
+                "saldo": conta.saldo,
+                "agencia": conta.agencia,
+                "titular": conta.cliente.nome
+            }
+        else:
+            raise StopIteration
 
 def main() -> None:
     clientes: List[Cliente] = []
@@ -337,7 +350,6 @@ def main() -> None:
             break
         else:
             print_message("Operação inválida, por favor selecione novamente a operação desejada.")
-
 
 if __name__ == "__main__":
     main()
