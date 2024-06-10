@@ -4,6 +4,23 @@ from datetime import datetime
 from functools import wraps
 from typing import List, Optional
 
+# Decorador de log atualizado
+def log_transacao(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        result = func(*args, **kwargs)
+        log_entry = (
+            f"{datetime.now().strftime('%d-%m-%Y %H:%M:%S')} - "
+            f"Função: {func.__name__} - "
+            f"Args: {args} - "
+            f"Kwargs: {kwargs} - "
+            f"Retorno: {result}\n"
+        )
+        with open("log.txt", "a") as log_file:
+            log_file.write(log_entry)
+        return result
+    return wrapper
+
 class Cliente:
     def __init__(self, endereco: str) -> None:
         self.endereco = endereco
@@ -22,15 +39,6 @@ class PessoaFisica(Cliente):
         self.data_nascimento = data_nascimento
         self.cpf = cpf
         self.senha = senha
-
-def log_transacao(func):
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        result = func(*args, **kwargs)
-        if isinstance(result, bool) and result:
-            print(f"{datetime.now().strftime('%d-%m-%Y %H:%M:%S')} - {func.__name__} realizada com sucesso!")
-        return result
-    return wrapper
 
 class Conta:
     def __init__(self, numero: int, cliente: Cliente) -> None:
