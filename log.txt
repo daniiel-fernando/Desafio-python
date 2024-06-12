@@ -1,0 +1,1 @@
+12-06-2024 15:23:06 - Função: depositar - Args: (<__main__.ContaCorrente object at 0x000001BFFEEB4500>, 500.0) - Kwargs: {} - Retorno: True

@@ -1,12 +1,43 @@
+import sqlite3
+from datetime import datetime
+from typing import List, Optional
 import textwrap
 from abc import ABC, abstractmethod
-from datetime import datetime
-from functools import wraps
-from typing import List, Optional
+
+# Conexão com o banco de dados SQLite
+con = sqlite3.connect('banco.db')
+cur = con.cursor()
+
+# Funções para criação e manipulação do banco de dados
+def criar_tabela_usuario():
+    cur.execute('''
+    CREATE TABLE IF NOT EXISTS usuarios (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        nome TEXT,
+        data_nascimento TEXT,
+        cpf TEXT UNIQUE,
+        senha TEXT,
+        endereco TEXT,
+        email TEXT,
+        agencia TEXT,
+        tipo_conta TEXT
+    )
+    ''')
+    con.commit()
+
+def inserir_usuario(nome, data_nascimento, cpf, senha, endereco, email, agencia, tipo_conta):
+    cur.execute('''
+    INSERT INTO usuarios (nome, data_nascimento, cpf, senha, endereco, email, agencia, tipo_conta)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (nome, data_nascimento, cpf, senha, endereco, email, agencia, tipo_conta))
+    con.commit()
+
+def autenticar_usuario(cpf, senha):
+    cur.execute('SELECT * FROM usuarios WHERE cpf = ? AND senha = ?', (cpf, senha))
+    return cur.fetchone()
 
 # Decorador de log atualizado
 def log_transacao(func):
-    @wraps(func)
     def wrapper(*args, **kwargs):
         result = func(*args, **kwargs)
         log_entry = (
@@ -24,7 +55,7 @@ def log_transacao(func):
 class Cliente:
     def __init__(self, endereco: str) -> None:
         self.endereco = endereco
-        self.contas: List[Conta] = []
+        self.contas: List['Conta'] = []
 
     def realizar_transacao(self, conta: 'Conta', transacao: 'Transacao') -> None:
         transacao.registrar(conta)
@@ -186,13 +217,11 @@ def menu() -> str:
 def filtrar_cliente(cpf: str, clientes: List[Cliente]) -> Optional[Cliente]:
     return next((cliente for cliente in clientes if cliente.cpf == cpf), None)
 
-def autenticar_cliente(cliente: Cliente) -> bool:
-    senha = input("Informe a senha: ")
-    if cliente.senha == senha:
-        return True
-    else:
-        print_message("Senha incorreta!")
-        return False
+def autenticar_cliente(cpf: str, senha: str, clientes: List[PessoaFisica]) -> Optional[PessoaFisica]:
+    cliente = filtrar_cliente(cpf, clientes)
+    if cliente and cliente.senha == senha:
+        return cliente
+    return None
 
 def recuperar_conta_cliente(cliente: Cliente) -> Optional[Conta]:
     if not cliente.contas:
@@ -213,15 +242,13 @@ def recuperar_conta_cliente(cliente: Cliente) -> Optional[Conta]:
         except ValueError:
             print_message("Entrada inválida, por favor insira um número.")
 
-def depositar(clientes: List[Cliente]) -> None:
+def depositar(clientes: List[PessoaFisica]) -> None:
     cpf = input("Informe o CPF do cliente: ")
-    cliente = filtrar_cliente(cpf, clientes)
+    senha = input("Informe a senha do cliente: ")
+    cliente = autenticar_cliente(cpf, senha, clientes)
 
     if not cliente:
-        print_message("Cliente não encontrado!")
-        return
-
-    if not autenticar_cliente(cliente):
+        print_message("Cliente não encontrado ou senha incorreta!")
         return
 
     try:
@@ -230,20 +257,18 @@ def depositar(clientes: List[Cliente]) -> None:
         print_message("Valor inválido!")
         return
 
-    transacao = Deposito(valor)
     conta = recuperar_conta_cliente(cliente)
     if conta:
+        transacao = Deposito(valor)
         cliente.realizar_transacao(conta, transacao)
 
-def sacar(clientes: List[Cliente]) -> None:
+def sacar(clientes: List[PessoaFisica]) -> None:
     cpf = input("Informe o CPF do cliente: ")
-    cliente = filtrar_cliente(cpf, clientes)
+    senha = input("Informe a senha do cliente: ")
+    cliente = autenticar_cliente(cpf, senha, clientes)
 
     if not cliente:
-        print_message("Cliente não encontrado!")
-        return
-
-    if not autenticar_cliente(cliente):
+        print_message("Cliente não encontrado ou senha incorreta!")
         return
 
     try:
@@ -252,12 +277,33 @@ def sacar(clientes: List[Cliente]) -> None:
         print_message("Valor inválido!")
         return
 
-    transacao = Saque(valor)
     conta = recuperar_conta_cliente(cliente)
     if conta:
+        transacao = Saque(valor)
         cliente.realizar_transacao(conta, transacao)
 
-def exibir_extrato(clientes: List[Cliente]) -> None:
+def exibir_extrato(clientes: List[PessoaFisica]) -> None:
+    cpf = input("Informe o CPF do cliente: ")
+    senha = input("Informe a senha do cliente: ")
+    cliente = autenticar_cliente(cpf, senha, clientes)
+
+    if not cliente:
+        print_message("Cliente não encontrado ou senha incorreta!")
+        return
+
+    conta = recuperar_conta_cliente(cliente)
+    if conta:
+        print("\n=============== EXTRATO ===============")
+        transacoes = conta.historico.transacoes
+        if not transacoes:
+            print("Não foram realizadas movimentações.")
+        else:
+            for transacao in transacoes:
+                print(f"{transacao['data']} - {transacao['tipo']}: R$ {transacao['valor']:.2f}")
+        print(f"\nSaldo: R$ {conta.saldo:.2f}")
+        print("========================================")
+
+def criar_conta(clientes: List[PessoaFisica]) -> None:
     cpf = input("Informe o CPF do cliente: ")
     cliente = filtrar_cliente(cpf, clientes)
 
@@ -265,78 +311,43 @@ def exibir_extrato(clientes: List[Cliente]) -> None:
         print_message("Cliente não encontrado!")
         return
 
-    if not autenticar_cliente(cliente):
-        return
-
-    conta = recuperar_conta_cliente(cliente)
-    if not conta:
-        return
-
-    print("\n================ EXTRATO ================")
-    transacoes = conta.historico.transacoes
-
-    extrato = "\n".join([f"{transacao['tipo']}:\n\tR$ {transacao['valor']:.2f}" for transacao in transacoes]) or "Não foram realizadas movimentações."
-    print(extrato)
-    print(f"\nSaldo:\n\tR$ {conta.saldo:.2f}")
-    print("==========================================")
-
-def criar_cliente(clientes: List[Cliente]) -> None:
-    cpf = input("Informe o CPF (somente número): ")
-    if filtrar_cliente(cpf, clientes):
-        print_message("Já existe cliente com esse CPF!")
-        return
-
-    nome = input("Informe o nome completo: ")
-    data_nascimento = input("Informe a data de nascimento (dd-mm-aaaa): ")
-    endereco = input("Informe o endereço (logradouro, nro - bairro - cidade/sigla estado): ")
-    senha = input("Crie uma senha: ")
-
-    cliente = PessoaFisica(nome=nome, data_nascimento=data_nascimento, cpf=cpf, senha=senha, endereco=endereco)
-    clientes.append(cliente)
-    print_message("Cliente criado com sucesso!", success=True)
-
-def criar_conta(numero_conta: int, clientes: List[Cliente], contas: List[Conta]) -> None:
-    cpf = input("Informe o CPF do cliente: ")
-    cliente = filtrar_cliente(cpf, clientes)
-
-    if not cliente:
-        print_message("Cliente não encontrado, fluxo de criação de conta encerrado!")
-        return
-
-    conta = ContaCorrente.nova_conta(cliente=cliente, numero=numero_conta)
-    contas.append(conta)
+    numero_conta = len(cliente.contas) + 1
+    conta = ContaCorrente.nova_conta(cliente, numero_conta)
     cliente.adicionar_conta(conta)
     print_message("Conta criada com sucesso!", success=True)
 
-def listar_contas(contas: List[Conta]) -> None:
-    for conta in contas:
-        print("=" * 100)
-        print(textwrap.dedent(str(conta)))
+def listar_contas(clientes: List[PessoaFisica]) -> None:
+    if not clientes:
+        print_message("Não há clientes cadastrados.")
+        return
 
-class IteradorContas:
-    def __init__(self, contas: List[Conta]):
-        self._contas = contas
-        self._index = 0
-
-    def __iter__(self):
-        return self
-
-    def __next__(self):
-        if self._index < len(self._contas):
-            conta = self._contas[self._index]
-            self._index += 1
-            return {
-                "numero": conta.numero,
-                "saldo": conta.saldo,
-                "agencia": conta.agencia,
-                "titular": conta.cliente.nome
-            }
+    for cliente in clientes:
+        if cliente.contas:
+            print(f"\nCliente: {cliente.nome}")
+            for conta in cliente.contas:
+                print(conta)
         else:
-            raise StopIteration
+            print(f"\nCliente: {cliente.nome} não possui contas.")
+
+def criar_cliente(clientes: List[PessoaFisica]) -> None:
+    nome = input("Informe o nome completo: ")
+    data_nascimento = input("Informe a data de nascimento (dd-mm-aaaa): ")
+    cpf = input("Informe o CPF (somente números): ")
+    senha = input("Informe uma senha: ")
+    endereco = input("Informe o endereço: ")
+    email = input("Informe o email: ")
+    agencia = input("Informe a agência: ")
+    tipo_conta = input("Informe o tipo de conta: ")
+
+    inserir_usuario(nome, data_nascimento, cpf, senha, endereco, email, agencia, tipo_conta)
+    cliente = PessoaFisica(nome, data_nascimento, cpf, senha, endereco)
+    clientes.append(cliente)
+    print_message("Cliente criado com sucesso!", success=True)
 
 def main() -> None:
-    clientes: List[Cliente] = []
-    contas: List[Conta] = []
+    clientes: List[PessoaFisica] = []
+
+    criar_tabela_usuario()
 
     while True:
         opcao = menu()
@@ -348,12 +359,11 @@ def main() -> None:
         elif opcao == "3":
             exibir_extrato(clientes)
         elif opcao == "4":
-            criar_cliente(clientes)
+            criar_conta(clientes)
         elif opcao == "5":
-            listar_contas(contas)
+            listar_contas(clientes)
         elif opcao == "6":
-            numero_conta = len(contas) + 1
-            criar_conta(numero_conta, clientes, contas)
+            criar_cliente(clientes)
         elif opcao == "7":
             break
         else:
